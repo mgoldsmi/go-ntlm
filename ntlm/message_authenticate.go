@@ -122,31 +122,35 @@ func ParseAuthenticateMessage(body []byte, ntlmVersion int) (*AuthenticateMessag
 		if err != nil {
 			return nil, err
 		}
+		// Update lowest offset in case the read of the encrypted session key has changed the result (unlikely but possible)
+		lowestOffset := am.getLowestPayloadOffset()
 		offset = offset + 8
 
 		am.NegotiateFlags = binary.LittleEndian.Uint32(body[offset : offset+4])
 		offset = offset + 4
 
-		// Version (8 bytes): A VERSION structure (section 2.2.2.10) that is present only when the NTLMSSP_NEGOTIATE_VERSION flag is set in the NegotiateFlags field. This structure is used for debugging purposes only. In normal protocol messages, it is ignored and does not affect the NTLM message processing.<9>
-		if NTLMSSP_NEGOTIATE_VERSION.IsSet(am.NegotiateFlags) {
+		// Version (8 bytes): A VERSION structure (section 2.2.2.10) that is present only when the NTLMSSP_NEGOTIATE_VERSION flag is set in the NegotiateFlags field.
+		// This structure is used for debugging purposes only. In normal protocol messages, it is ignored and does not affect the NTLM message processing.<9>
+		if lowestOffset > 64 {
 			am.Version, err = ReadVersionStruct(body[offset : offset+8])
 			if err != nil {
 				return nil, err
+			} else if NTLMSSP_NEGOTIATE_VERSION.IsSet(am.NegotiateFlags) && am.Version.ProductBuild == 0 {
+				return nil, errors.New("NTLMSSP_NEGOTIATE_VERSION set but invalid version supplied")
 			}
 			offset = offset + 8
-		}
 
-		// The MS-NLMP has this to say about the MIC
-		//   "An AUTHENTICATE_MESSAGE indicates the presence of a MIC field if the TargetInfo field has an AV_PAIR structure whose two fields are:
-		//   AvId == MsvAvFlags Value bit 0x2 == 1"
-		// However there is no TargetInfo structure in the Authenticate Message! There is one in the Challenge Message though. So I'm using
-		// a hack to check to see if there is a MIC. I look to see if there is room for the MIC before the payload starts. If so I assume
-		// there is a MIC and read it out.
-		var lowestOffset = am.getLowestPayloadOffset()
-		if lowestOffset > offset {
-			// MIC - 16 bytes
-			am.Mic = body[offset : offset+16]
-			offset = offset + 16
+			// The MS-NLMP has this to say about the MIC
+			//   "An AUTHENTICATE_MESSAGE indicates the presence of a MIC field if the TargetInfo field has an AV_PAIR structure whose two fields are:
+			//   AvId == MsvAvFlags Value bit 0x2 == 1"
+			// However there is no TargetInfo structure in the Authenticate Message! There is one in the Challenge Message though. So I'm using
+			// a hack to check to see if there is a MIC. I look to see if there is room for the MIC before the payload starts. If so I assume
+			// there is a MIC and read it out.
+			if lowestOffset > 72 {
+				// MIC - 16 bytes
+				am.Mic = body[offset : offset+16]
+				offset = offset + 16
+			}
 		}
 	}
 
@@ -181,9 +185,29 @@ func (a *AuthenticateMessage) getLowestPayloadOffset() int {
 }
 
 func (a *AuthenticateMessage) Bytes() []byte {
-	payloadLen := int(a.LmChallengeResponse.Len + a.NtChallengeResponseFields.Len + a.DomainName.Len + a.UserName.Len + a.Workstation.Len + a.EncryptedRandomSessionKey.Len)
 	messageLen := 8 + 4 + 6*8 + 4 + 8 + 16
 	payloadOffset := uint32(messageLen)
+
+	// Calculate the payload length
+	payloadLen := 0
+	if a.LmChallengeResponse != nil {
+		payloadLen += int(a.LmChallengeResponse.Len)
+	}
+	if a.NtChallengeResponseFields != nil {
+		payloadLen += int(a.NtChallengeResponseFields.Len)
+	}
+	if a.DomainName != nil {
+		payloadLen += int(a.DomainName.Len)
+	}
+	if a.UserName != nil {
+		payloadLen += int(a.UserName.Len)
+	}
+	if a.Workstation != nil {
+		payloadLen += int(a.Workstation.Len)
+	}
+	if a.EncryptedRandomSessionKey != nil {
+		payloadLen += int(a.EncryptedRandomSessionKey.Len)
+	}
 
 	messageBytes := make([]byte, 0, messageLen+payloadLen)
 	buffer := bytes.NewBuffer(messageBytes)
@@ -192,36 +216,73 @@ func (a *AuthenticateMessage) Bytes() []byte {
 
 	binary.Write(buffer, binary.LittleEndian, a.MessageType)
 
-	a.LmChallengeResponse.Offset = payloadOffset
-	payloadOffset += uint32(a.LmChallengeResponse.Len)
-	buffer.Write(a.LmChallengeResponse.Bytes())
+	if a.LmChallengeResponse != nil {
+		a.LmChallengeResponse.Offset = payloadOffset
+		payloadOffset += uint32(a.LmChallengeResponse.Len)
+		buffer.Write(a.LmChallengeResponse.Bytes())
+	} else {
+		p, _ := CreateBytePayload(make([]byte, 0, 0))
+		p.Offset = payloadOffset
+		buffer.Write(p.Bytes())
+	}
 
-	a.NtChallengeResponseFields.Offset = payloadOffset
-	payloadOffset += uint32(a.NtChallengeResponseFields.Len)
-	buffer.Write(a.NtChallengeResponseFields.Bytes())
+	if a.NtChallengeResponseFields != nil {
+		a.NtChallengeResponseFields.Offset = payloadOffset
+		payloadOffset += uint32(a.NtChallengeResponseFields.Len)
+		buffer.Write(a.NtChallengeResponseFields.Bytes())
+	} else {
+		p, _ := CreateBytePayload(make([]byte, 0, 0))
+		p.Offset = payloadOffset
+		buffer.Write(p.Bytes())
+	}
 
-	a.DomainName.Offset = payloadOffset
-	payloadOffset += uint32(a.DomainName.Len)
-	buffer.Write(a.DomainName.Bytes())
+	if a.DomainName != nil {
+		a.DomainName.Offset = payloadOffset
+		payloadOffset += uint32(a.DomainName.Len)
+		buffer.Write(a.DomainName.Bytes())
+	} else {
+		p, _ := CreateBytePayload(make([]byte, 0, 0))
+		p.Offset = payloadOffset
+		buffer.Write(p.Bytes())
+	}
 
-	a.UserName.Offset = payloadOffset
-	payloadOffset += uint32(a.UserName.Len)
-	buffer.Write(a.UserName.Bytes())
+	if a.UserName != nil {
+		a.UserName.Offset = payloadOffset
+		payloadOffset += uint32(a.UserName.Len)
+		buffer.Write(a.UserName.Bytes())
+	} else {
+		p, _ := CreateBytePayload(make([]byte, 0, 0))
+		p.Offset = payloadOffset
+		buffer.Write(p.Bytes())
+	}
 
-	a.Workstation.Offset = payloadOffset
-	payloadOffset += uint32(a.Workstation.Len)
-	buffer.Write(a.Workstation.Bytes())
+	if a.Workstation != nil {
+		a.Workstation.Offset = payloadOffset
+		payloadOffset += uint32(a.Workstation.Len)
+		buffer.Write(a.Workstation.Bytes())
+	} else {
+		p, _ := CreateBytePayload(make([]byte, 0, 0))
+		p.Offset = payloadOffset
+		buffer.Write(p.Bytes())
+	}
 
-	a.EncryptedRandomSessionKey.Offset = payloadOffset
-	payloadOffset += uint32(a.EncryptedRandomSessionKey.Len)
-	buffer.Write(a.EncryptedRandomSessionKey.Bytes())
+	if a.EncryptedRandomSessionKey != nil {
+		a.EncryptedRandomSessionKey.Offset = payloadOffset
+		payloadOffset += uint32(a.EncryptedRandomSessionKey.Len)
+		buffer.Write(a.EncryptedRandomSessionKey.Bytes())
+	} else {
+		p, _ := CreateBytePayload(make([]byte, 0, 0))
+		p.Offset = payloadOffset
+		buffer.Write(p.Bytes())
+	}
 
 	buffer.Write(uint32ToBytes(a.NegotiateFlags))
 
 	if a.Version != nil {
 		buffer.Write(a.Version.Bytes())
 	} else {
-		buffer.Write(make([]byte, 8))
+		nilVersion := VersionStruct{}
+		buffer.Write(nilVersion.Bytes())
 	}
 
 	if a.Mic != nil {
@@ -231,12 +292,24 @@ func (a *AuthenticateMessage) Bytes() []byte {
 	}
 
 	// Write out the payloads
-	buffer.Write(a.LmChallengeResponse.Payload)
-	buffer.Write(a.NtChallengeResponseFields.Payload)
-	buffer.Write(a.DomainName.Payload)
-	buffer.Write(a.UserName.Payload)
-	buffer.Write(a.Workstation.Payload)
-	buffer.Write(a.EncryptedRandomSessionKey.Payload)
+	if a.LmChallengeResponse != nil {
+		buffer.Write(a.LmChallengeResponse.Payload)
+	}
+	if a.NtChallengeResponseFields != nil {
+		buffer.Write(a.NtChallengeResponseFields.Payload)
+	}
+	if a.DomainName != nil {
+		buffer.Write(a.DomainName.Payload)
+	}
+	if a.UserName != nil {
+		buffer.Write(a.UserName.Payload)
+	}
+	if a.Workstation != nil {
+		buffer.Write(a.Workstation.Payload)
+	}
+	if a.EncryptedRandomSessionKey != nil {
+		buffer.Write(a.EncryptedRandomSessionKey.Payload)
+	}
 
 	return buffer.Bytes()
 }
@@ -268,9 +341,15 @@ func (a *AuthenticateMessage) String() string {
 		buffer.WriteString("\n")
 	}
 
-	buffer.WriteString(fmt.Sprintf("UserName: %s\n", a.UserName.String()))
-	buffer.WriteString(fmt.Sprintf("DomainName: %s\n", a.DomainName.String()))
-	buffer.WriteString(fmt.Sprintf("Workstation: %s\n", a.Workstation.String()))
+	if a.UserName != nil {
+		buffer.WriteString(fmt.Sprintf("UserName: %s\n", a.UserName.String()))
+	}
+	if a.DomainName != nil {
+		buffer.WriteString(fmt.Sprintf("DomainName: %s\n", a.DomainName.String()))
+	}
+	if a.Workstation != nil {
+		buffer.WriteString(fmt.Sprintf("Workstation: %s\n", a.Workstation.String()))
+	}
 
 	if a.EncryptedRandomSessionKey != nil {
 		buffer.WriteString(fmt.Sprintf("EncryptedRandomSessionKey: %s\n", a.EncryptedRandomSessionKey.String()))

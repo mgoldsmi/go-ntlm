@@ -66,14 +66,20 @@ func ParseChallengeMessage(body []byte) (*ChallengeMessage, error) {
 		return challenge, errors.New("Invalid NTLM message type should be 0x00000002 for challenge message")
 	}
 
+	challenge.NegotiateFlags = binary.LittleEndian.Uint32(body[20:24])
+
+	if !NTLMSSP_NEGOTIATE_UNICODE.IsSet(challenge.NegotiateFlags) {
+		return challenge, errors.New("Unicode supported not provided by client. Implementation only supports unicode encoding") // Unicode is assumed by this implementation
+	}
+
 	var err error
 
 	challenge.TargetName, err = ReadStringPayload(12, body)
 	if err != nil {
 		return nil, err
+	} else if NTLMSSP_REQUEST_TARGET.IsSet(challenge.NegotiateFlags) && challenge.TargetName.Len == 0 {
+		return nil, errors.New("NTLMSSP_REQUEST_TARGET set but no target supplied for challenge message")
 	}
-
-	challenge.NegotiateFlags = binary.LittleEndian.Uint32(body[20:24])
 
 	challenge.ServerChallenge = body[24:32]
 
@@ -82,29 +88,35 @@ func ParseChallengeMessage(body []byte) (*ChallengeMessage, error) {
 	challenge.TargetInfoPayloadStruct, err = ReadBytePayload(40, body)
 	if err != nil {
 		return nil, err
+	} else if NTLMSSP_NEGOTIATE_TARGET_INFO.IsSet(challenge.NegotiateFlags) && challenge.TargetInfoPayloadStruct.Len == 0 {
+		return nil, errors.New("NTLMSSP_NEGOTIATE_TARGET_INFO set but no target info supplied for challenge message")
 	}
-
 	challenge.TargetInfo = ReadAvPairs(challenge.TargetInfoPayloadStruct.Payload)
 
-	offset := 48
-
-	if NTLMSSP_NEGOTIATE_VERSION.IsSet(challenge.NegotiateFlags) {
-		challenge.Version, err = ReadVersionStruct(body[offset : offset+8])
-		if err != nil {
-			return nil, err
-		}
-		offset = offset + 8
+	challenge.Version, err = ReadVersionStruct(body[48:56])
+	if err != nil {
+		return nil, err
+	} else if NTLMSSP_NEGOTIATE_VERSION.IsSet(challenge.NegotiateFlags) && challenge.Version.ProductBuild == 0 {
+		return nil, errors.New("NTLMSSP_NEGOTIATE_VERSION set but invalid version supplied for challenge message")
 	}
 
-	challenge.Payload = body[offset:]
+	challenge.Payload = body[56:]
 
 	return challenge, nil
 }
 
 func (c *ChallengeMessage) Bytes() []byte {
-	payloadLen := int(c.TargetName.Len + c.TargetInfoPayloadStruct.Len)
 	messageLen := 8 + 4 + 8 + 4 + 8 + 8 + 8 + 8
 	payloadOffset := uint32(messageLen)
+
+	// Calculate the payload length
+	payloadLen := 0
+	if c.TargetName != nil {
+		payloadLen += int(c.TargetName.Len)
+	}
+	if c.TargetInfoPayloadStruct != nil {
+		payloadLen += int(c.TargetInfoPayloadStruct.Len)
+	}
 
 	messageBytes := make([]byte, 0, messageLen+payloadLen)
 	buffer := bytes.NewBuffer(messageBytes)
@@ -112,27 +124,45 @@ func (c *ChallengeMessage) Bytes() []byte {
 	buffer.Write(c.Signature)
 	binary.Write(buffer, binary.LittleEndian, c.MessageType)
 
-	c.TargetName.Offset = payloadOffset
-	buffer.Write(c.TargetName.Bytes())
-	payloadOffset += uint32(c.TargetName.Len)
+	if c.TargetName != nil {
+		c.TargetName.Offset = payloadOffset
+		buffer.Write(c.TargetName.Bytes())
+		payloadOffset += uint32(c.TargetName.Len)
+	} else {
+		p, _ := CreateBytePayload(make([]byte, 0, 0))
+		p.Offset = payloadOffset
+		buffer.Write(p.Bytes())
+	}
 
 	binary.Write(buffer, binary.LittleEndian, c.NegotiateFlags)
+
 	buffer.Write(c.ServerChallenge)
 	buffer.Write(make([]byte, 8))
 
-	c.TargetInfoPayloadStruct.Offset = payloadOffset
-	buffer.Write(c.TargetInfoPayloadStruct.Bytes())
-	payloadOffset += uint32(c.TargetInfoPayloadStruct.Len)
+	if c.TargetInfoPayloadStruct != nil {
+		c.TargetInfoPayloadStruct.Offset = payloadOffset
+		buffer.Write(c.TargetInfoPayloadStruct.Bytes())
+		payloadOffset += uint32(c.TargetInfoPayloadStruct.Len)
+	} else {
+		p, _ := CreateBytePayload(make([]byte, 0, 0))
+		p.Offset = payloadOffset
+		buffer.Write(p.Bytes())
+	}
 
-	// if(c.Version != nil) {
-	buffer.Write(c.Version.Bytes())
-	// } else {
-	//  buffer.Write(make([]byte, 8))
-	//}
+	if c.Version != nil {
+		buffer.Write(c.Version.Bytes())
+	} else {
+		nilVersion := VersionStruct{}
+		buffer.Write(nilVersion.Bytes())
+	}
 
 	// Write out the payloads
-	buffer.Write(c.TargetName.Payload)
-	buffer.Write(c.TargetInfoPayloadStruct.Payload)
+	if c.TargetName != nil {
+		buffer.Write(c.TargetName.Payload)
+	}
+	if c.TargetInfoPayloadStruct != nil {
+		buffer.Write(c.TargetInfoPayloadStruct.Payload)
+	}
 
 	return buffer.Bytes()
 }
@@ -157,14 +187,18 @@ func (c *ChallengeMessage) String() string {
 
 	buffer.WriteString("Challenge NTLM Message")
 	buffer.WriteString(fmt.Sprintf("\nPayload Offset: %d Length: %d", c.getLowestPayloadOffset(), len(c.Payload)))
-	buffer.WriteString(fmt.Sprintf("\nTargetName: %s", c.TargetName.String()))
+	if c.TargetName != nil {
+		buffer.WriteString(fmt.Sprintf("\nTargetName: %s", c.TargetName.String()))
+	}
 	buffer.WriteString(fmt.Sprintf("\nServerChallenge: %s", hex.EncodeToString(c.ServerChallenge)))
 	if c.Version != nil {
 		buffer.WriteString(fmt.Sprintf("\nVersion: %s\n", c.Version.String()))
 	}
-	buffer.WriteString("\nTargetInfo")
-	buffer.WriteString(c.TargetInfo.String())
-	buffer.WriteString(fmt.Sprintf("\nFlags %d\n", c.NegotiateFlags))
+	if c.TargetInfo != nil {
+		buffer.WriteString("\nTargetInfo")
+		buffer.WriteString(c.TargetInfo.String())
+	}
+	buffer.WriteString(fmt.Sprintf("\nFlags %x\n", c.NegotiateFlags))
 	buffer.WriteString(FlagsToString(c.NegotiateFlags))
 
 	return buffer.String()
