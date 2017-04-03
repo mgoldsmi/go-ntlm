@@ -41,6 +41,8 @@ func CreateClientSession(version Version, mode Mode) (n ClientSession, err error
 
 type ClientSession interface {
 	SetUserInfo(username string, password string, domain string)
+	SetMachineName(nbMachineName string)
+
 	SetMode(mode Mode)
 
 	GenerateNegotiateMessage() (*NegotiateMessage, error)
@@ -74,6 +76,8 @@ type ServerSession interface {
 	SetUserInfo(username string, password string, domain string)
 	GetUserInfo() (string, string, string)
 
+	SetTargetInfo(domainJoined bool, nbMachineName, nbDomainName, dnsMachineName, dnsDomainName, dnsForestName string)
+
 	SetMode(mode Mode)
 	SetServerChallenge(challege []byte)
 
@@ -97,6 +101,13 @@ type SessionData struct {
 	user       string
 	password   string
 	userDomain string
+
+	domainJoined   bool
+	nbMachineName  string
+	nbDomainName   string
+	dnsMachineName string
+	dnsDomainName  string
+	dnsForestName  string
 
 	NegotiateFlags uint32
 

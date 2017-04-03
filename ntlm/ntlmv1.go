@@ -168,6 +168,15 @@ func (n *V1ServerSession) SetServerChallenge(challenge []byte) {
 	n.serverChallenge = challenge
 }
 
+func (n *V1ServerSession) SetTargetInfo(domainJoined bool, nbMachineName, nbDomainName, dnsMachineName, dnsDomainName, dnsForestName string) {
+	n.domainJoined = domainJoined
+	n.nbMachineName = nbMachineName
+	n.nbDomainName = nbDomainName
+	n.dnsMachineName = dnsMachineName
+	n.dnsDomainName = dnsDomainName
+	n.dnsForestName = dnsForestName
+}
+
 func (n *V1ServerSession) GetSessionData() *SessionData {
 	return &n.SessionData
 }
@@ -269,6 +278,10 @@ type V1ClientSession struct {
 	V1Session
 }
 
+func (n *V1ClientSession) SetMachineName(nbMachineName string) {
+	n.nbMachineName = nbMachineName
+}
+
 func (n *V1ClientSession) GenerateNegotiateMessage() (nm *NegotiateMessage, err error) {
 	return nil, nil
 }
@@ -346,7 +359,7 @@ func (n *V1ClientSession) GenerateAuthenticateMessage() (am *AuthenticateMessage
 	am.NtChallengeResponseFields, _ = CreateBytePayload(n.ntChallengeResponse)
 	am.DomainName, _ = CreateStringPayload(n.userDomain)
 	am.UserName, _ = CreateStringPayload(n.user)
-	am.Workstation, _ = CreateStringPayload("SQUAREMILL")
+	am.Workstation, _ = CreateStringPayload(n.nbMachineName)
 	am.EncryptedRandomSessionKey, _ = CreateBytePayload(n.encryptedRandomSessionKey)
 	am.NegotiateFlags = n.NegotiateFlags
 	am.Version = &VersionStruct{ProductMajorVersion: uint8(5), ProductMinorVersion: uint8(1), ProductBuild: uint16(2600), NTLMRevisionCurrent: uint8(15)}

@@ -149,6 +149,15 @@ func (n *V2ServerSession) SetServerChallenge(challenge []byte) {
 	n.serverChallenge = challenge
 }
 
+func (n *V2ServerSession) SetTargetInfo(domainJoined bool, nbMachineName, nbDomainName, dnsMachineName, dnsDomainName, dnsForestName string) {
+	n.domainJoined = domainJoined
+	n.nbMachineName = nbMachineName
+	n.nbDomainName = nbDomainName
+	n.dnsMachineName = dnsMachineName
+	n.dnsDomainName = dnsDomainName
+	n.dnsForestName = dnsForestName
+}
+
 func (n *V2ServerSession) ProcessNegotiateMessage(nm *NegotiateMessage) (err error) {
 	n.negotiateMessage = nm
 	return
@@ -182,11 +191,21 @@ func (n *V2ServerSession) GenerateChallengeMessage() (cm *ChallengeMessage, err 
 
 	// Create the AvPairs we need
 	pairs := new(AvPairs)
-	pairs.AddAvPair(MsvAvNbDomainName, utf16FromString("REUTERS"))
-	pairs.AddAvPair(MsvAvNbComputerName, utf16FromString("UKBP-CBTRMFE06"))
-	pairs.AddAvPair(MsvAvDnsDomainName, utf16FromString("Reuters.net"))
-	pairs.AddAvPair(MsvAvDnsComputerName, utf16FromString("ukbp-cbtrmfe06.Reuters.net"))
-	pairs.AddAvPair(MsvAvDnsTreeName, utf16FromString("Reuters.net"))
+	if len(n.nbMachineName) > 0 {
+		pairs.AddAvPair(MsvAvNbComputerName, utf16FromString(n.nbMachineName))
+	}
+	if len(n.nbDomainName) > 0 {
+		pairs.AddAvPair(MsvAvNbDomainName, utf16FromString(n.nbDomainName))
+	}
+	if len(n.dnsMachineName) > 0 {
+		pairs.AddAvPair(MsvAvDnsComputerName, utf16FromString(n.dnsMachineName))
+	}
+	if len(n.dnsDomainName) > 0 {
+		pairs.AddAvPair(MsvAvDnsDomainName, utf16FromString(n.dnsDomainName))
+	}
+	if len(n.dnsForestName) > 0 {
+		pairs.AddAvPair(MsvAvDnsTreeName, utf16FromString(n.dnsForestName))
+	}
 	pairs.AddAvPair(MsvAvEOL, make([]byte, 0))
 	cm.TargetInfo = pairs
 	cm.TargetInfoPayloadStruct, _ = CreateBytePayload(pairs.Bytes())
@@ -287,6 +306,10 @@ type V2ClientSession struct {
 	V2Session
 }
 
+func (n *V2ClientSession) SetMachineName(nbMachineName string) {
+	n.nbMachineName = nbMachineName
+}
+
 func (n *V2ClientSession) GenerateNegotiateMessage() (nm *NegotiateMessage, err error) {
 	return nil, nil
 }
@@ -359,7 +382,7 @@ func (n *V2ClientSession) GenerateAuthenticateMessage() (am *AuthenticateMessage
 	am.NtChallengeResponseFields, _ = CreateBytePayload(n.ntChallengeResponse)
 	am.DomainName, _ = CreateStringPayload(n.userDomain)
 	am.UserName, _ = CreateStringPayload(n.user)
-	am.Workstation, _ = CreateStringPayload("SQUAREMILL")
+	am.Workstation, _ = CreateStringPayload(n.nbMachineName)
 	am.EncryptedRandomSessionKey, _ = CreateBytePayload(n.encryptedRandomSessionKey)
 	am.NegotiateFlags = n.NegotiateFlags
 	am.Mic = make([]byte, 16)
