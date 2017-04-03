@@ -16,6 +16,14 @@ func TestUTf16ToString(t *testing.T) {
 	}
 }
 
+func TestUTf16ToStringChinese(t *testing.T) {
+	expected, _ := hex.DecodeString("480065006C006C006F002C002000164E4C75")
+	result := utf16FromString("Hello, 世界")
+	if !bytes.Equal(expected, result) {
+		t.Errorf("UTf16ToStringChinese failed got %s expected %s", hex.EncodeToString(result), "480065006C006C006F002C002000164E4C75")
+	}
+}
+
 func TestMacsEquals(t *testing.T) {
 	// the MacsEqual should ignore the values in the second 4 bytes
 	firstSlice := []byte{0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xf0, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff}

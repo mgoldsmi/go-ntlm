@@ -60,7 +60,7 @@ func utf16FromString(s string) []byte {
 	result := zeroBytes(len(encoded) * 2)
 	for i := 0; i < len(encoded); i++ {
 		result[i*2] = byte(encoded[i])
-		result[i*2+1] = byte(encoded[i] << 8)
+		result[i*2+1] = byte(encoded[i] >> 8)
 	}
 	return result
 }
