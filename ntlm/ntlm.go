@@ -44,6 +44,7 @@ type ClientSession interface {
 	SetMachineName(nbMachineName string)
 
 	SetMode(mode Mode)
+	SetVersion(ver VersionStruct)
 
 	GenerateNegotiateMessage() (*NegotiateMessage, error)
 	ProcessChallengeMessage(*ChallengeMessage) error
@@ -79,6 +80,8 @@ type ServerSession interface {
 	SetTargetInfo(domainJoined bool, nbMachineName, nbDomainName, dnsMachineName, dnsDomainName, dnsForestName string)
 
 	SetMode(mode Mode)
+	SetVersion(ver VersionStruct)
+
 	SetServerChallenge(challege []byte)
 
 	ProcessNegotiateMessage(*NegotiateMessage) error
@@ -98,6 +101,7 @@ type ServerSession interface {
 type SessionData struct {
 	mode Mode
 	configFlags    uint32
+	windowsVersion *VersionStruct
 
 	user       string
 	password   string

@@ -138,6 +138,11 @@ func (n *V1Session) Version() int {
 	return 1
 }
 
+// Sets the Windows Version information to be passed between the client and server during authentication
+func (n *V1Session) SetVersion(version VersionStruct) {
+	n.windowsVersion = &version
+}
+
 func (n *V1Session) fetchResponseKeys() (err error) {
 	// Usually at this point we'd go out to Active Directory and get these keys
 	// Here we are assuming we have the information locally
@@ -318,7 +323,7 @@ func (n *V1ServerSession) GenerateChallengeMessage() (cm *ChallengeMessage, err 
 	}
 
 	if NTLMSSP_NEGOTIATE_VERSION.IsSet(cm.NegotiateFlags) {
-		cm.Version = &VersionStruct{ProductMajorVersion: uint8(5), ProductMinorVersion: uint8(1), ProductBuild: uint16(2600), NTLMRevisionCurrent: uint8(15)}
+		cm.Version = n.windowsVersion
 	}
 
 	// Connectionless mode - save negotiate flags to session
@@ -381,14 +386,13 @@ func (n *V1ServerSession) ProcessAuthenticateMessage(am *AuthenticateMessage) (e
 		return err
 	}
 
-	if am.Version == nil {
-		//UGH not entirely sure how this could possibly happen, going to put this in for now
-		//TODO investigate if this ever is really happening
-		am.Version = &VersionStruct{ProductMajorVersion: uint8(5), ProductMinorVersion: uint8(1), ProductBuild: uint16(2600), NTLMRevisionCurrent: uint8(15)}
-		log.Printf("Nil version in ntlmv1")
+	// If the server doesn't indicate their NTLM revision, assume zero
+	ntlmRevision := uint8(0)
+	if am.Version != nil {
+		ntlmRevision = am.Version.NTLMRevisionCurrent
 	}
 
-	err = n.calculateKeys(am.Version.NTLMRevisionCurrent)
+	err = n.calculateKeys(ntlmRevision)
 	if err != nil {
 		return err
 	}
@@ -485,7 +489,7 @@ func (n *V1ClientSession) GenerateNegotiateMessage() (nm *NegotiateMessage, err 
 	if NTLMSSP_NEGOTIATE_VERSION.IsSet(nm.NegotiateFlags) {
 		nm.WorkstationFields, _ = CreateStringPayload("")
 		nm.DomainNameFields, _ = CreateStringPayload("")
-		nm.Version = &VersionStruct{ProductMajorVersion: uint8(5), ProductMinorVersion: uint8(1), ProductBuild: uint16(2600), NTLMRevisionCurrent: uint8(15)}
+		nm.Version = n.windowsVersion
 	}
 
 	// Save to represent the current set of negotiated flags
@@ -544,7 +548,13 @@ func (n *V1ClientSession) GenerateAuthenticateMessage() (am *AuthenticateMessage
 		return nil, err
 	}
 
-	err = n.calculateKeys(cm.Version.NTLMRevisionCurrent)
+	// If the server doesn't indicate their NTLM revision, assume zero
+	ntlmRevision := uint8(0)
+	if cm.Version != nil {
+		ntlmRevision = cm.Version.NTLMRevisionCurrent
+	}
+
+	err = n.calculateKeys(ntlmRevision)
 	if err != nil {
 		return nil, err
 	}
@@ -562,10 +572,15 @@ func (n *V1ClientSession) GenerateAuthenticateMessage() (am *AuthenticateMessage
 	am.NtChallengeResponseFields, _ = CreateBytePayload(n.ntChallengeResponse)
 	am.DomainName, _ = CreateStringPayload(n.userDomain)
 	am.UserName, _ = CreateStringPayload(n.user)
+
+	// Set machine name to the server name returned in challenge message if windows version information is to be sent
+	if NTLMSSP_NEGOTIATE_VERSION.IsSet(n.NegotiateFlags) {
+		am.Version = n.windowsVersion
 	am.Workstation, _ = CreateStringPayload(n.nbMachineName)
+	}
+
 	am.EncryptedRandomSessionKey, _ = CreateBytePayload(n.encryptedRandomSessionKey)
 	am.NegotiateFlags = n.NegotiateFlags
-	am.Version = &VersionStruct{ProductMajorVersion: uint8(5), ProductMinorVersion: uint8(1), ProductBuild: uint16(2600), NTLMRevisionCurrent: uint8(15)}
 	return am, nil
 }
 
