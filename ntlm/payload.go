@@ -69,8 +69,24 @@ func CreateStringPayload(value string) (*PayloadStruct, error) {
 	return p, nil
 }
 
+func CreateOEMStringPayload(value string) (*PayloadStruct, error) {
+	// Create UTF16 unicode bytes from string
+	bytes := []byte(value)
+	p := new(PayloadStruct)
+	p.Type = OemStringPayload
+	p.Len = uint16(len(bytes))
+	p.MaxLen = uint16(len(bytes))
+	p.Payload = make([]byte, len(bytes))
+	copy(p.Payload, bytes)
+	return p, nil
+}
+
 func ReadStringPayload(startByte int, bytes []byte) (*PayloadStruct, error) {
 	return ReadPayloadStruct(startByte, bytes, UnicodeStringPayload)
+}
+
+func ReadOEMStringPayload(startByte int, bytes []byte) (*PayloadStruct, error) {
+	return ReadPayloadStruct(startByte, bytes, OemStringPayload)
 }
 
 func ReadBytePayload(startByte int, bytes []byte) (*PayloadStruct, error) {
