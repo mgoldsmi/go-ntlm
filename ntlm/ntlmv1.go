@@ -6,6 +6,7 @@ import (
 	"bytes"
 	rc4P "crypto/rc4"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 )
@@ -105,16 +106,7 @@ func (n *V1Session) calculateKeys(ntlmRevisionCurrent uint8) (err error) {
 	return
 }
 
-func (n *V1Session) Seal(message []byte) ([]byte, error) {
-	return nil, nil
-}
-
-func (n *V1Session) Sign(message []byte) ([]byte, error) {
-	return nil, nil
-}
-
-func ntlmV1Mac(message []byte, sequenceNumber int, handle *rc4P.Cipher, sealingKey, signingKey []byte, NegotiateFlags uint32) []byte {
-	// TODO: Need to keep track of the sequence number for connection oriented NTLM
+func ntlmV1Mac(message []byte, sequenceNumber uint32, handle *rc4P.Cipher, sealingKey, signingKey []byte, NegotiateFlags uint32) []byte {
 	if NTLMSSP_NEGOTIATE_DATAGRAM.IsSet(NegotiateFlags) && NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY.IsSet(NegotiateFlags) {
 		handle, _ = reinitSealingKey(sealingKey, sequenceNumber)
 	} else if NTLMSSP_NEGOTIATE_DATAGRAM.IsSet(NegotiateFlags) {
@@ -122,28 +114,8 @@ func ntlmV1Mac(message []byte, sequenceNumber int, handle *rc4P.Cipher, sealingK
 		// algorithm as described in the MS-NTLM document. Just reinitialize it directly.
 		handle, _ = rc4Init(sealingKey)
 	}
-	sig := mac(NegotiateFlags, handle, signingKey, uint32(sequenceNumber), message)
+	sig := mac(NegotiateFlags, handle, signingKey, sequenceNumber, message)
 	return sig.Bytes()
-}
-
-func (n *V1ServerSession) Mac(message []byte, sequenceNumber int) ([]byte, error) {
-	mac := ntlmV1Mac(message, sequenceNumber, n.serverHandle, n.ServerSealingKey, n.ServerSigningKey, n.NegotiateFlags)
-	return mac, nil
-}
-
-func (n *V1ClientSession) Mac(message []byte, sequenceNumber int) ([]byte, error) {
-	mac := ntlmV1Mac(message, sequenceNumber, n.clientHandle, n.ClientSealingKey, n.ClientSigningKey, n.NegotiateFlags)
-	return mac, nil
-}
-
-func (n *V1ServerSession) VerifyMac(message, expectedMac []byte, sequenceNumber int) (bool, error) {
-	mac := ntlmV1Mac(message, sequenceNumber, n.clientHandle, n.ClientSealingKey, n.ClientSigningKey, n.NegotiateFlags)
-	return MacsEqual(mac, expectedMac), nil
-}
-
-func (n *V1ClientSession) VerifyMac(message, expectedMac []byte, sequenceNumber int) (bool, error) {
-	mac := ntlmV1Mac(message, sequenceNumber, n.serverHandle, n.ServerSealingKey, n.ServerSigningKey, n.NegotiateFlags)
-	return MacsEqual(mac, expectedMac), nil
 }
 
 /**************
@@ -152,6 +124,10 @@ func (n *V1ClientSession) VerifyMac(message, expectedMac []byte, sequenceNumber 
 
 type V1ServerSession struct {
 	V1Session
+}
+
+func (n *V1ServerSession) GetSessionData() *SessionData {
+	return &n.SessionData
 }
 
 func (n *V1ServerSession) ProcessNegotiateMessage(nm *NegotiateMessage) (err error) {
@@ -175,10 +151,6 @@ func (n *V1ServerSession) SetTargetInfo(domainJoined bool, nbMachineName, nbDoma
 	n.dnsMachineName = dnsMachineName
 	n.dnsDomainName = dnsDomainName
 	n.dnsForestName = dnsForestName
-}
-
-func (n *V1ServerSession) GetSessionData() *SessionData {
-	return &n.SessionData
 }
 
 func (n *V1ServerSession) ProcessAuthenticateMessage(am *AuthenticateMessage) (err error) {
@@ -268,6 +240,48 @@ func (n *V1ServerSession) computeExportedSessionKey() (err error) {
 		// n.calculatedMic = HmacMd5(n.keyExchangeKey, concat(n.challengeMessage.Payload, n.authenticateMessage.Bytes))
 	}
 	return nil
+}
+
+func (n *V1ServerSession) Mac(message []byte, sequenceNumber uint32) ([]byte, error) {
+	mac := ntlmV1Mac(message, sequenceNumber, n.serverHandle, n.ServerSealingKey, n.ServerSigningKey, n.NegotiateFlags)
+	return mac, nil
+}
+
+func (n *V1ServerSession) VerifyMac(message, expectedMac []byte, sequenceNumber uint32) (bool, error) {
+	mac := ntlmV1Mac(message, sequenceNumber, n.clientHandle, n.ClientSealingKey, n.ClientSigningKey, n.NegotiateFlags)
+	return MacsEqual(mac, expectedMac), nil
+}
+
+func (n *V1ServerSession) Wrap(message []byte, sequenceNumber uint32) (emessage, mac []byte, err error) {
+
+	// Seal (if required)
+	if NTLMSSP_NEGOTIATE_SEAL.IsSet(n.NegotiateFlags) {
+		emessage = rc4(n.serverHandle, message)
+	} else {
+		copy(emessage, message)
+	}
+
+	// Sign
+	mac, err = n.Mac(message, sequenceNumber)
+
+	return emessage, mac, err
+}
+
+func (n *V1ServerSession) Unwrap(emessage []byte, expectedMac []byte, sequenceNumber uint32) (message []byte, ok bool, err error) {
+	// Unseal (if required)
+	if NTLMSSP_NEGOTIATE_SEAL.IsSet(n.NegotiateFlags) {
+		message = rc4(n.clientHandle, emessage)
+	} else {
+		copy(message, emessage)
+	}
+
+	if ok, err := n.VerifyMac(message, expectedMac, sequenceNumber); err != nil {
+		return nil, false, fmt.Errorf("Error unsealing message - %v", err)
+	} else if !ok {
+		return nil, false, fmt.Errorf("Error unsealing message - signature does not match")
+	}
+
+	return message, true, nil
 }
 
 /*************
@@ -377,6 +391,48 @@ func (n *V1ClientSession) computeEncryptedSessionKey() (err error) {
 		n.encryptedRandomSessionKey = n.keyExchangeKey
 	}
 	return nil
+}
+
+func (n *V1ClientSession) Mac(message []byte, sequenceNumber uint32) ([]byte, error) {
+	mac := ntlmV1Mac(message, sequenceNumber, n.clientHandle, n.ClientSealingKey, n.ClientSigningKey, n.NegotiateFlags)
+	return mac, nil
+}
+
+func (n *V1ClientSession) VerifyMac(message, expectedMac []byte, sequenceNumber uint32) (bool, error) {
+	mac := ntlmV1Mac(message, sequenceNumber, n.serverHandle, n.ServerSealingKey, n.ServerSigningKey, n.NegotiateFlags)
+	return MacsEqual(mac, expectedMac), nil
+}
+
+func (n *V1ClientSession) Wrap(message []byte, sequenceNumber uint32) (emessage, mac []byte, err error) {
+
+	// Seal (if required)
+	if NTLMSSP_NEGOTIATE_SEAL.IsSet(n.NegotiateFlags) {
+		emessage = rc4(n.clientHandle, message)
+	} else {
+		copy(emessage, message)
+	}
+
+	// Sign
+	mac, err = n.Mac(message, sequenceNumber)
+
+	return emessage, mac, err
+}
+
+func (n *V1ClientSession) Unwrap(emessage []byte, expectedMac []byte, sequenceNumber uint32) (message []byte, ok bool, err error) {
+	// Unseal (if required)
+	if NTLMSSP_NEGOTIATE_SEAL.IsSet(n.NegotiateFlags) {
+		message = rc4(n.serverHandle, emessage)
+	} else {
+		copy(message, emessage)
+	}
+
+	if ok, err := n.VerifyMac(message, expectedMac, sequenceNumber); err != nil {
+		return nil, false, fmt.Errorf("Error unsealing message - %v", err)
+	} else if !ok {
+		return nil, false, fmt.Errorf("Error unsealing message - signature does not match")
+	}
+
+	return message, true, nil
 }
 
 /********************************

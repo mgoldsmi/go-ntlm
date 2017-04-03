@@ -111,9 +111,9 @@ func macWithExtendedSessionSecurity(negFlags uint32, handle *rc4P.Cipher, signin
 	return sig
 }
 
-func reinitSealingKey(key []byte, sequenceNumber int) (handle *rc4P.Cipher, err error) {
+func reinitSealingKey(key []byte, sequenceNumber uint32) (handle *rc4P.Cipher, err error) {
 	seqNumBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(seqNumBytes, uint32(sequenceNumber))
+	binary.LittleEndian.PutUint32(seqNumBytes, sequenceNumber)
 	newKey := md5(concat(key, seqNumBytes))
 	handle, err = rc4Init(newKey)
 	return handle, err

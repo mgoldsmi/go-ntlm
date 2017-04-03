@@ -49,10 +49,10 @@ type ClientSession interface {
 	ProcessChallengeMessage(*ChallengeMessage) error
 	GenerateAuthenticateMessage() (*AuthenticateMessage, error)
 
-	Seal(message []byte) ([]byte, error)
-	Sign(message []byte) ([]byte, error)
-	Mac(message []byte, sequenceNumber int) ([]byte, error)
-	VerifyMac(message, expectedMac []byte, sequenceNumber int) (bool, error)
+	Wrap(message []byte, sequenceNumber uint32) (emessage, mac []byte, err error)
+	Unwrap(emessage []byte, expectedMac []byte, sequenceNumber uint32) (message []byte, ok bool, err error)
+	Mac(message []byte, sequenceNumber uint32) (mac []byte, err error)
+	VerifyMac(message, expectedMac []byte, sequenceNumber uint32) (ok bool, err error)
 }
 
 // Creates an NTLM v1 or v2 server
@@ -88,10 +88,10 @@ type ServerSession interface {
 	GetSessionData() *SessionData
 
 	Version() int
-	Seal(message []byte) ([]byte, error)
-	Sign(message []byte) ([]byte, error)
-	Mac(message []byte, sequenceNumber int) ([]byte, error)
-	VerifyMac(message, expectedMac []byte, sequenceNumber int) (bool, error)
+	Wrap(message []byte, sequenceNumber uint32) (emessage, mac []byte, err error)
+	Unwrap(emessage []byte, expectedMac []byte, sequenceNumber uint32) (message []byte, ok bool, err error)
+	Mac(message []byte, sequenceNumber uint32) (mac []byte, err error)
+	VerifyMac(message, expectedMac []byte, sequenceNumber uint32) (ok bool, err error)
 }
 
 // This struct collects NTLM data structures and keys that are used across all types of NTLM requests
