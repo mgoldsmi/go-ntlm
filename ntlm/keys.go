@@ -42,7 +42,7 @@ func signKey(flags uint32, randomSessionKey []byte, mode string) (signKey []byte
 }
 
 // 	Define SEALKEY(NegotiateFlags, RandomSessionKey, Mode) as
-func sealKey(flags uint32, randomSessionKey []byte, mode string) (sealKey []byte) {
+func sealKey(flags uint32, randomSessionKey []byte, mode string, ntlmRevisionCurrent uint8) (sealKey []byte) {
 	if NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY.IsSet(flags) {
 		if NTLMSSP_NEGOTIATE_128.IsSet(flags) {
 			sealKey = randomSessionKey
@@ -56,7 +56,7 @@ func sealKey(flags uint32, randomSessionKey []byte, mode string) (sealKey []byte
 		} else {
 			sealKey = md5(concat(sealKey, []byte("session key to server-to-client sealing key magic constant\x00")))
 		}
-	} else if NTLMSSP_NEGOTIATE_LM_KEY.IsSet(flags) {
+	} else if NTLMSSP_NEGOTIATE_LM_KEY.IsSet(flags) || (NTLMSSP_NEGOTIATE_DATAGRAM.IsSet(flags) && ntlmRevisionCurrent >= NTLMSSP_REVISION_W2K3) {
 		if NTLMSSP_NEGOTIATE_56.IsSet(flags) {
 			sealKey = concat(randomSessionKey[0:7], []byte{0xA0})
 		} else {
