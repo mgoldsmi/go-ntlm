@@ -93,10 +93,8 @@ func TestNtlmV1(t *testing.T) {
 
 	var err error
 	// 4.2.2.1.3 Session Base Key and Key Exchange Key
-	err = n.computeSessionBaseKey()
+	err = n.computeExpectedResponses()
 	checkV1Value(t, "sessionBaseKey", n.sessionBaseKey, "d87262b0cde4b1cb7499becccdf10784", err)
-	err = n.computeKeyExchangeKey()
-	checkV1Value(t, "keyExchangeKey", n.keyExchangeKey, "d87262b0cde4b1cb7499becccdf10784", err)
 
 	// 4.2.2.2.1 NTLMv1 Response
 	// NTChallengeResponse with With NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY not set
@@ -197,7 +195,6 @@ func TestNTLMv1WithClientChallenge(t *testing.T) {
 	var err error
 	// 4.2.2.1.3 Session Base Key and Key Exchange Key
 	err = n.computeExpectedResponses()
-	err = n.computeSessionBaseKey()
 	checkV1Value(t, "sessionBaseKey", n.sessionBaseKey, "d87262b0cde4b1cb7499becccdf10784", err)
 	checkV1Value(t, "LMv1Response", n.lmChallengeResponse, "aaaaaaaaaaaaaaaa00000000000000000000000000000000", err)
 	checkV1Value(t, "NTLMv1Response", n.ntChallengeResponse, "7537f803ae367128ca458204bde7caf81e97ed2683267232", err)

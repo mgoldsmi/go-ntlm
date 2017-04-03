@@ -97,6 +97,7 @@ type ServerSession interface {
 // This struct collects NTLM data structures and keys that are used across all types of NTLM requests
 type SessionData struct {
 	mode Mode
+	configFlags    uint32
 
 	user       string
 	password   string
