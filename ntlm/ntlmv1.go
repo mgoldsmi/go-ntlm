@@ -190,6 +190,9 @@ func (n *V1Session) SetMinAuthPolicy(flags uint32) {
 	n.minAuthPolicy = flags
 }
 
+func (n *V1Session) SetMaxLifetime(maxLifetime uint64) {
+	log.Printf("WARN: Call to SetMaxLifetime() ignored as lifetime check is NTLMv2 functionality")
+}
 
 func (n *V1Session) Version() int {
 	return 1

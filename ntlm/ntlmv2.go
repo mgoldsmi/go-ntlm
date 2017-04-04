@@ -192,6 +192,14 @@ func (n *V2Session) SetMinAuthPolicy(flags uint32) {
 	n.minAuthPolicy = flags
 }
 
+// SetMaxLifetime sets the maximum lifetime in tenths of microseconds permitted between the challenge and authenticate
+// messages. For example, calling SetMaxLifetime(30 * 60 * 1E7) means a maximum of 30mins is allowed between the challenge
+// and response message before the response is considered unsafe and discarded (default for Windows NT/2000). Setting the
+// lifetime to zero disables this check
+func (n *V2Session) SetMaxLifetime(maxLifetime uint64) {
+	n.maxLifetime = maxLifetime
+}
+
 func (n *V2Session) Version() int {
 	return 2
 }
@@ -354,6 +362,11 @@ func (n *V2ServerSession) GenerateChallengeMessage() (cm *ChallengeMessage, err 
 		if len(n.dnsForestName) > 0 {
 			pairs.AddAvPair(MsvAvDnsTreeName, utf16FromString(n.dnsForestName))
 		}
+
+		// NTLMv2: Including Timestamp appears to have been overlooked in NTLM specification
+		timestamp := timeToWindowsFileTime(time.Now())
+		pairs.AddAvPair(MsvAvTimestamp, timestamp)
+
 		pairs.AddAvPair(MsvAvEOL, make([]byte, 0))
 		cm.TargetInfo = pairs
 		cm.TargetInfoPayloadStruct, _ = CreateBytePayload(pairs.Bytes())
@@ -397,6 +410,14 @@ func (n *V2ServerSession) ProcessAuthenticateMessage(am *AuthenticateMessage) (e
 
 	timestamp := am.NtlmV2Response.NtlmV2ClientChallenge.TimeStamp
 	avPairsBytes := am.NtlmV2Response.NtlmV2ClientChallenge.AvPairs.Bytes()
+
+	// NTLMv2: Confirm timestamp is within limits. If maxLifetime is set to zero then check is skipped
+	if n.maxLifetime > 0 {
+		if timediff := calcLifetime(timestamp); timediff < 0 || timediff > int64(n.maxLifetime) {
+			err := fmt.Errorf("Message timestamp exceeds maximum lifetime. Check time is synchronised between client and server")
+			return err
+		}
+	}
 
 	err = n.computeExpectedResponses(timestamp, avPairsBytes)
 	if err != nil {
@@ -555,6 +576,14 @@ func (n *V2ClientSession) ProcessChallengeMessage(cm *ChallengeMessage) (err err
 	n.clientChallenge = randomBytes(8)
 	n.exportedSessionKey = randomBytes(16)
 
+	// NTLMv2: Check for timestamp in TargetInfo and use it if present
+	n.timestamp = timeToWindowsFileTime(time.Now())
+	if cm.TargetInfo != nil {
+		if avTimestamp := cm.TargetInfo.Find(MsvAvTimestamp); avTimestamp != nil {
+			copy(n.timestamp, avTimestamp.Value)
+		}
+	}
+
 	return nil
 }
 
@@ -702,4 +731,14 @@ func timeToWindowsFileTime(t time.Time) []byte {
 	buffer := bytes.NewBuffer(make([]byte, 0, 8))
 	binary.Write(buffer, binary.LittleEndian, ll)
 	return buffer.Bytes()
+}
+
+// Calculates the lifetime of the message in number of tenths of a microsecond
+func calcLifetime(msgTimestamp []byte) int64 {
+	var currentTime, msgTime int64
+	currentTime = (int64(time.Now().Unix()) * int64(10000000)) + int64(116444736000000000)
+	buffer := bytes.NewBuffer(msgTimestamp)
+	binary.Read(buffer, binary.LittleEndian, &msgTime)
+
+	return currentTime - msgTime
 }

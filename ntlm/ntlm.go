@@ -96,6 +96,7 @@ type ServerSession interface {
 	SetConfigFlags(flags uint32) (err error)
 	SetMinAuthPolicy(flags uint32)
 	SetVersion(ver VersionStruct)
+	SetMaxLifetime(maxLifeime uint64)
 
 	SetServerChallenge(challege []byte)
 
@@ -117,6 +118,7 @@ type SessionData struct {
 	configFlags    uint32
 	minAuthPolicy  uint32
 	windowsVersion *VersionStruct
+	maxLifetime    uint64
 
 	user       string
 	password   string
@@ -147,6 +149,7 @@ type SessionData struct {
 	keyExchangeKey            []byte
 	sessionBaseKey            []byte
 	mic                       []byte
+	timestamp                 []byte
 
 	ClientSigningKey []byte
 	ServerSigningKey []byte
