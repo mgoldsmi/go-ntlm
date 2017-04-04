@@ -24,7 +24,7 @@ func TestDecodeChallenge(t *testing.T) {
 		t.Error("Failed to parse challenge message " + err.Error())
 	}
 
-	if challenge.TargetName.Len != 0 || challenge.TargetName.MaxLen != 0 || challenge.TargetName.Offset != 56 {
+	if challenge.TargetName != nil && challenge.TargetName.Len > 0 {
 		values := fmt.Sprintf("TargetName Len:%v MaxLen:%v Offset:%v", challenge.TargetName.Len, challenge.TargetName.MaxLen, challenge.TargetName.Offset)
 		t.Error("Failed to parse Target Name in challenge: " + values)
 	}
@@ -44,6 +44,74 @@ func TestDecodeChallenge(t *testing.T) {
 	}
 
 	if len(challenge.Payload) != int(challenge.TargetInfoPayloadStruct.Len) {
+		t.Error("Payload length is not long enough")
+	}
+
+	challenge.String()
+
+	outBytes := challenge.Bytes()
+
+	if len(outBytes) > 0 {
+		reparsed, err := ParseChallengeMessage(outBytes)
+		if err != nil {
+			t.Error("Could not re-parse challenge message")
+		}
+		if reparsed.String() != challenge.String() {
+			t.Error("Reparsed message is not the same")
+		}
+	} else {
+		t.Error("Invalid challenge messsage bytes")
+	}
+}
+
+func TestDecodeChallengeWithSealing(t *testing.T) {
+	challengeMessage := "TlRMTVNTUAACAAAADAAMADgAAAA1goriE1O8+WkjYuQAAAAAAAAAAFAAUABEAAAABgOAJQAAAA9UAEUAUwBUAE4AVAACAAwAVABFAFMAVABOAFQAAQAMAFQARQBTAFQATgBUAAQADABUAEUAUwBUAE4AVAADAAwAVABFAFMAVABOAFQABwAIADOtQjcPdtIBAAAAAA=="
+	challengeData, err := base64.StdEncoding.DecodeString(challengeMessage)
+
+	if err != nil {
+		t.Error("Could not base64 decode message data")
+	}
+
+	challenge, err := ParseChallengeMessage(challengeData)
+
+	if err != nil || challenge == nil {
+		t.Error("Failed to parse challenge message " + err.Error())
+	}
+
+	if challenge.TargetName.Len != uint16(len("TESTNT")) && challenge.TargetName.String() != "TESTNT" {
+		t.Error("Target name fields is not correct: '" + challenge.TargetName.String() + "'")
+	}
+
+	expectedFlags := uint32(0)
+	expectedFlags = NTLMSSP_NEGOTIATE_56.Set(expectedFlags)
+	expectedFlags = NTLMSSP_NEGOTIATE_KEY_EXCH.Set(expectedFlags)
+	expectedFlags = NTLMSSP_NEGOTIATE_128.Set(expectedFlags)
+	expectedFlags = NTLMSSP_NEGOTIATE_VERSION.Set(expectedFlags)
+	expectedFlags = NTLMSSP_NEGOTIATE_TARGET_INFO.Set(expectedFlags)
+	expectedFlags = NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY.Set(expectedFlags)
+	expectedFlags = NTLMSSP_TARGET_TYPE_SERVER.Set(expectedFlags)
+	expectedFlags = NTLMSSP_NEGOTIATE_ALWAYS_SIGN.Set(expectedFlags)
+	expectedFlags = NTLMSSP_NEGOTIATE_NTLM.Set(expectedFlags)
+	expectedFlags = NTLMSSP_NEGOTIATE_SEAL.Set(expectedFlags)
+	expectedFlags = NTLMSSP_NEGOTIATE_SIGN.Set(expectedFlags)
+	expectedFlags = NTLMSSP_REQUEST_TARGET.Set(expectedFlags)
+	expectedFlags = NTLMSSP_NEGOTIATE_UNICODE.Set(expectedFlags)
+
+	if challenge.NegotiateFlags != expectedFlags {
+		t.Errorf("Challenge negotiate flags not correct should be %v got %d", expectedFlags, challenge.NegotiateFlags)
+	}
+
+	serverChallenge, err := hex.DecodeString("1353bcf9692362e4")
+	if !bytes.Equal(challenge.ServerChallenge, serverChallenge) {
+		hex := hex.EncodeToString(challenge.ServerChallenge)
+		t.Error("Server challenge is not correct '" + hex + "'")
+	}
+
+	if challenge.Version.ProductMajorVersion != 6 || challenge.Version.ProductMinorVersion != 3 || challenge.Version.ProductBuild != 9600 || challenge.Version.NTLMRevisionCurrent != 15 {
+		t.Error("Version information is not correct: '" + challenge.Version.String() + "'")
+	}
+
+	if len(challenge.Payload) != int(challenge.TargetName.Len+challenge.TargetInfoPayloadStruct.Len) {
 		t.Error("Payload length is not long enough")
 	}
 

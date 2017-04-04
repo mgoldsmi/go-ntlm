@@ -54,7 +54,8 @@ func CreateBytePayload(bytes []byte) (*PayloadStruct, error) {
 	p.Type = BytesPayload
 	p.Len = uint16(len(bytes))
 	p.MaxLen = uint16(len(bytes))
-	p.Payload = bytes // TODO: Copy these bytes instead of keeping a reference
+	p.Payload = make([]byte, len(bytes))
+	copy(p.Payload, bytes)
 	return p, nil
 }
 
@@ -65,7 +66,8 @@ func CreateStringPayload(value string) (*PayloadStruct, error) {
 	p.Type = UnicodeStringPayload
 	p.Len = uint16(len(bytes))
 	p.MaxLen = uint16(len(bytes))
-	p.Payload = bytes // TODO: Copy these bytes instead of keeping a reference
+	p.Payload = make([]byte, len(bytes))
+	copy(p.Payload, bytes)
 	return p, nil
 }
 
@@ -100,11 +102,8 @@ func ReadPayloadStruct(startByte int, bytes []byte, PayloadType int) (*PayloadSt
 	p.Len = binary.LittleEndian.Uint16(bytes[startByte : startByte+2])
 	p.MaxLen = binary.LittleEndian.Uint16(bytes[startByte+2 : startByte+4])
 	p.Offset = binary.LittleEndian.Uint32(bytes[startByte+4 : startByte+8])
-
-	if p.Len > 0 {
 		endOffset := p.Offset + uint32(p.Len)
 		p.Payload = bytes[p.Offset:endOffset]
-	}
 
 	return p, nil
 }
