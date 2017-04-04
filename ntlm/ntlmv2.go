@@ -578,6 +578,26 @@ func (n *V2ClientSession) ProcessChallengeMessage(cm *ChallengeMessage) (err err
 
 	n.NegotiateFlags = flags
 
+	// NTLMv2: Confirm computer name and domain name provided
+	if NTLMSSP_NEGOTIATE_SIGN.IsSet(flags) || NTLMSSP_NEGOTIATE_SEAL.IsSet(flags) {
+		if cm.TargetInfo == nil {
+			err := fmt.Errorf("Unable to ensure integrity/confidentiality as no target information provided")
+			return err
+		}
+
+		avNbComputerName := cm.TargetInfo.Find(MsvAvNbComputerName)
+		if avNbComputerName == nil || avNbComputerName.AvLen == 0 {
+			err := fmt.Errorf("Unable to ensure integrity/confidentiality as no target computer name provided")
+			return err
+		}
+
+		avNbDomainName := cm.TargetInfo.Find(MsvAvNbDomainName)
+		if avNbDomainName == nil || avNbDomainName.AvLen == 0 {
+			err := fmt.Errorf("Unable to ensure integrity/confidentiality as no target domain name provided")
+			return err
+		}
+	}
+
 	// Initialisation of these independent variables done here to provide an opportunity to override in test cases. See TestNTLMv2ClientAuthentication for example
 	n.clientChallenge = randomBytes(8)
 	n.exportedSessionKey = randomBytes(16)

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -60,7 +61,9 @@ func TestNTLMv2(t *testing.T) {
 
 	// Challenge message
 	client := new(V2ClientSession)
+	client.SetConfigFlags(flags)
 	client.SetUserInfo("User", "Password", "Domain")
+	client.SetMachineName("SQUAREMILL")
 
 	challengeMessageBytes, _ := hex.DecodeString("4e544c4d53535000020000000c000c003800000033828ae20123456789abcdef00000000000000002400240044000000060070170000000f53006500720076006500720002000c0044006f006d00610069006e0001000c0053006500720076006500720000000000")
 	challengeMessage, err := ParseChallengeMessage(challengeMessageBytes)
@@ -77,6 +80,7 @@ func TestNTLMv2(t *testing.T) {
 
 	server := new(V2ServerSession)
 	server.SetUserInfo("User", "Password", "Domain")
+	server.SetTargetInfo(true, "UKBP-CBTRMFE06", "REUTERS", "ukbp-cbtrmfe06.Reuters.net", "Reuters.net", "Reuters.net")
 	server.serverChallenge = challengeMessage.ServerChallenge
 
 	// Authenticate message
@@ -116,46 +120,323 @@ func TestNTLMv2(t *testing.T) {
 
 	checkV2Value(t, "client seal key", server.ClientSealingKey, "59f600973cc4960a25480a7c196e4c58", nil)
 	checkV2Value(t, "client signing key", server.ClientSigningKey, "4788dc861b4782f35d43fd98fe1a2d39", nil)
+}
 
-	// Have the server generate an initial challenge message
-	challenge, err := server.GenerateChallengeMessage()
-	challenge.String()
+func NTLMv2SessionNegotiation(t *testing.T, client *ClientSession, server *ServerSession, mode Mode) (err error) {
 
-	// Have the client process this server challenge message
-	client = new(V2ClientSession)
-	client.SetUserInfo("User", "Password", "Domain")
-	err = client.ProcessChallengeMessage(challenge)
-	if err != nil {
-		t.Errorf("Could not process server generated challenge message: %s", err)
+	c, s := *client, *server
+
+	if mode.stream {
+		nm, err := c.GenerateNegotiateMessage()
+		if err != nil {
+			err := fmt.Errorf("Could not generate negotiate message: %s", err)
+			return err
+		}
+
+		nm, err = ParseNegotiateMessage(nm.Bytes())
+		if err != nil {
+			err := fmt.Errorf("Error encoding/decoding negotiate message: %s", err)
+			return err
+		}
+
+		err = s.ProcessNegotiateMessage(nm)
+		if err != nil {
+			err := fmt.Errorf("Could not process negotiate message: %s", err)
+			return err
+		}
 	}
-	// TODO: we should be able to use the ntlm library end to end to make sure
-	// that Mac, VerifyMac
 
-	// // the client should be able to verify the server's mac
-	// sig := "<NTLM><foo><bar>"
-	// mac, err := server.Mac([]byte(sig), 100)
-	// if err != nil {
-	// 	t.Errorf("Could not generate a mac for %s", sig)
-	// }
-	// matches, err := client.VerifyMac([]byte(sig), mac, 100)
-	// if err != nil {
-	// 	t.Errorf("Could not verify mac for %s (mac = %v)", sig, mac)
-	// }
-	// if !matches {
-	// 	t.Errorf("Server's Mac couldn't be verified by client")
-	// }
+	cm, err := s.GenerateChallengeMessage()
+	if err != nil {
+		err := fmt.Errorf("Could not generate challenge message: %s", err)
+		return err
+	}
 
-	// mac, err = client.Mac([]byte(sig), 100)
-	// if err != nil {
-	// 	t.Errorf("Could not generate a mac for %s", sig)
-	// }
-	// matches, err = server.VerifyMac([]byte(sig), mac, 100)
-	// if err != nil {
-	// 	t.Errorf("Could not verify mac for %s (mac = %v)", sig, mac)
-	// }
-	// if !matches {
-	// 	t.Errorf("Client's Mac couldn't be verified by server")
-	// }
+	//fmt.Printf("Challenge message: %v", cm)
+
+	cm, err = ParseChallengeMessage(cm.Bytes())
+	if err != nil {
+		err := fmt.Errorf("Error encoding/decoding challenge message: %s", err)
+		return err
+	}
+
+	err = c.ProcessChallengeMessage(cm)
+	if err != nil {
+		err := fmt.Errorf("Could not process challenge message: %s", err)
+		return err
+	}
+
+	am, err := c.GenerateAuthenticateMessage()
+	if err != nil {
+		err := fmt.Errorf("Could not generate authenticate message: %s", err)
+		return err
+	}
+
+	//fmt.Printf("Authenticate message: %v", am)
+
+	am, err = ParseAuthenticateMessage(am.Bytes(), 2)
+	if err != nil {
+		err := fmt.Errorf("Error encoding/decoding authentication message: %s", err)
+		return err
+	}
+
+	err = s.ProcessAuthenticateMessage(am)
+	if err != nil {
+		err := fmt.Errorf("Failed to authenticate session authenticate message: %s", err)
+		return err
+	}
+
+	// t.Log("Successful authentication\n")
+	return nil
+}
+
+/**
+* Test NTLMv2 connection-oriented client & server session negotiation with signing and version exchange
+ */
+func TestNTLMv2ConnectionOriented(t *testing.T) {
+
+	mode := ConnectionOrientedMode
+	client, err := CreateClientSession(Version2, mode)
+	if err != nil {
+		t.Errorf("Could not create client session: %s", err)
+		t.FailNow()
+	}
+
+	if ver, err := GetVersion("Windows 7 SP1"); err != nil {
+		t.Errorf("Could not get version for Windows 7 SP1: %s", err)
+		t.Fail()
+	} else {
+		client.SetVersion(ver)
+	}
+
+	client.SetUserInfo("User", "Password", "Domain")
+	client.SetMachineName("COMPUTER")
+
+	server, err := CreateServerSession(Version2, mode)
+	if err != nil {
+		t.Errorf("Could not create server session: %s", err)
+		t.FailNow()
+	}
+
+	if ver, err := GetVersion("Windows Server 2012 R2"); err != nil {
+		t.Errorf("Could not get version for Windows Server 2012 R2: %s", err)
+		t.Fail()
+	} else {
+		server.SetVersion(ver)
+	}
+
+	server.SetUserInfo("User", "Password", "Domain")
+	server.SetTargetInfo(false, "UKBP-CBTRMFE06", "REUTERS", "ukbp-cbtrmfe06.Reuters.net", "Reuters.net", "Reuters.net")
+
+	// Attempt session negotiation
+	if err := NTLMv2SessionNegotiation(t, &client, &server, mode); err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+
+	// Now check if client and server session states are equivalent by signing and sealing messages
+	// We use the ntlm library end to end to make sure that Mac, VerifyMac
+	// the client should be able to verify the server's mac
+	sig := "<NTLM><foo><bar>"
+	if mac, err := server.Mac([]byte(sig), 100); err != nil {
+		t.Errorf("Could not generate a mac for %s", sig)
+		t.Fail()
+	} else {
+		if matches, err := client.VerifyMac([]byte(sig), mac, 100); err != nil {
+			t.Errorf("Could not verify mac for %s (mac = %v)", sig, mac)
+			t.Fail()
+		} else if !matches {
+			t.Errorf("Server's Mac couldn't be verified by client")
+			t.Fail()
+		}
+	}
+
+	if mac, err := client.Mac([]byte(sig), 100); err != nil {
+		t.Errorf("Could not generate a mac for %s", sig)
+		t.Fail()
+	} else {
+		if matches, err := server.VerifyMac([]byte(sig), mac, 100); err != nil {
+			t.Errorf("Could not verify mac for %s (mac = %v)", sig, mac)
+			t.Fail()
+		} else if !matches {
+			t.Errorf("Client's Mac couldn't be verified by server")
+			t.Fail()
+		}
+	}
+}
+
+/**
+* Test NTLMv2 connectionless client & server session negotiation (no version exchange) with signing and sealing
+ */
+func TestNTLMv2Connectionless(t *testing.T) {
+
+	mode := Mode{integrity: true, confidentiality: true, stream: false}
+	client, err := CreateClientSession(Version2, mode)
+	if err != nil {
+		t.Errorf("Could not create client session: %s", err)
+		t.FailNow()
+	}
+	client.SetUserInfo("User", "Password", "Domain")
+	client.SetMachineName("COMPUTER")
+
+	server, err := CreateServerSession(Version2, mode)
+	if err != nil {
+		t.Errorf("Could not create server session: %s", err)
+		t.FailNow()
+	}
+
+	server.SetUserInfo("User", "Password", "Domain")
+	server.SetTargetInfo(false, "UKBP-CBTRMFE06", "REUTERS", "ukbp-cbtrmfe06.Reuters.net", "Reuters.net", "Reuters.net")
+
+	// Attempt session negotiation
+	if err := NTLMv2SessionNegotiation(t, &client, &server, mode); err != nil {
+		t.Error(err)
+		t.FailNow()
+	}
+
+	// Now check if client and server session states are equivalent by signing and sealing messages
+	// We use the ntlm library end to end to make sure that Mac, VerifyMac
+	// the client should be able to verify the server's mac
+	sig := "<NTLM><foo><bar>"
+	if mac, err := server.Mac([]byte(sig), 100); err != nil {
+		t.Errorf("Could not generate a mac for %s", sig)
+		t.Fail()
+	} else {
+		if matches, err := client.VerifyMac([]byte(sig), mac, 100); err != nil {
+			t.Errorf("Could not verify mac for %s (mac = %v)", sig, mac)
+			t.Fail()
+		} else if !matches {
+			t.Errorf("Server's Mac couldn't be verified by client")
+			t.Fail()
+		}
+	}
+
+	if mac, err := client.Mac([]byte(sig), 100); err != nil {
+		t.Errorf("Could not generate a mac for %s", sig)
+		t.Fail()
+	} else {
+		if matches, err := server.VerifyMac([]byte(sig), mac, 100); err != nil {
+			t.Errorf("Could not verify mac for %s (mac = %v)", sig, mac)
+			t.Fail()
+		} else if !matches {
+			t.Errorf("Client's Mac couldn't be verified by server")
+			t.Fail()
+		}
+	}
+
+	// Check sealing
+	message := "Confirm encryption of this message"
+	if sealed, mac, err := client.Wrap([]byte(message), 20); err != nil {
+		t.Errorf("Client unable to seal message %s", err)
+		t.Fail()
+	} else {
+		if unsealed, ok, err := server.Unwrap([]byte(sealed), mac, 20); err != nil {
+			t.Errorf("Failed to unseal message %s", err)
+			t.Logf("Signature was: %v", mac)
+			t.Fail()
+		} else if !ok {
+			t.Error("Expected MAC did not match")
+			t.Fail()
+		} else if bytes.Compare([]byte(message), unsealed) != 0 {
+			t.Error("Unencrypted message does not match original message")
+			t.Fail()
+		}
+	}
+}
+
+func TestNTLMv2FailedAuthentication(t *testing.T) {
+
+	// Create client session without signing and sealing
+	mode := ConnectionOrientedMode
+	client, err := CreateClientSession(Version2, mode)
+	if err != nil {
+		t.Errorf("Could not create client session: %s", err)
+		t.FailNow()
+	}
+	client.SetUserInfo("User", "Password", "Domain")
+	client.SetMachineName("COMPUTER")
+
+	server, err := CreateServerSession(Version2, mode)
+	if err != nil {
+		t.Errorf("Could not create server session: %s", err)
+		t.FailNow()
+	}
+	server.SetUserInfo("User", "password", "Domain")
+	server.SetTargetInfo(false, "UKBP-CBTRMFE06", "REUTERS", "ukbp-cbtrmfe06.Reuters.net", "Reuters.net", "Reuters.net")
+
+	// Attempt session negotiation
+	if err := NTLMv2SessionNegotiation(t, &client, &server, mode); err == nil {
+		t.Error("Session negotiation was successful despite wrong password")
+		t.Fail()
+	}
+}
+
+func TestNTLMv2ClientAuthPolicy(t *testing.T) {
+
+	// Create client session without signing and sealing
+	mode := ConnectionOrientedMode
+	client, err := CreateClientSession(Version2, mode)
+	if err != nil {
+		t.Errorf("Could not create client session: %s", err)
+		t.FailNow()
+	}
+	client.SetUserInfo("User", "Password", "Domain")
+	client.SetMachineName("COMPUTER")
+
+	server, err := CreateServerSession(Version2, mode)
+	if err != nil {
+		t.Errorf("Could not create server session: %s", err)
+		t.FailNow()
+	}
+	server.SetUserInfo("User", "Password", "Domain")
+	server.SetTargetInfo(false, "UKBP-CBTRMFE06", "REUTERS", "ukbp-cbtrmfe06.Reuters.net", "Reuters.net", "Reuters.net")
+
+	// Set min auth policy that requires signing and sealing
+	minAuthPolicy := uint32(0)
+	minAuthPolicy = NTLMSSP_NEGOTIATE_128.Set(minAuthPolicy)
+	minAuthPolicy = NTLMSSP_NEGOTIATE_SEAL.Set(minAuthPolicy)
+	minAuthPolicy = NTLMSSP_NEGOTIATE_SIGN.Set(minAuthPolicy)
+	client.SetMinAuthPolicy(minAuthPolicy)
+
+	// Attempt session negotiation
+	if err := NTLMv2SessionNegotiation(t, &client, &server, mode); err == nil {
+		t.Error("Session negotiation was successful despite not meeting minimum authentication policy")
+		t.Fail()
+	}
+}
+
+func TestNTLMv2ServerAuthPolicy(t *testing.T) {
+
+	// Create client session without signing and sealing
+	mode := ConnectionOrientedMode
+	client, err := CreateClientSession(Version2, mode)
+	if err != nil {
+		t.Errorf("Could not create client session: %s", err)
+		t.FailNow()
+	}
+	client.SetUserInfo("User", "Password", "Domain")
+	client.SetMachineName("COMPUTER")
+
+	server, err := CreateServerSession(Version2, mode)
+	if err != nil {
+		t.Errorf("Could not create server session: %s", err)
+		t.FailNow()
+	}
+	server.SetUserInfo("User", "Password", "Domain")
+	server.SetTargetInfo(false, "UKBP-CBTRMFE06", "REUTERS", "ukbp-cbtrmfe06.Reuters.net", "Reuters.net", "Reuters.net")
+
+	// Set min auth policy that requires signing and sealing
+	minAuthPolicy := uint32(0)
+	minAuthPolicy = NTLMSSP_NEGOTIATE_128.Set(minAuthPolicy)
+	minAuthPolicy = NTLMSSP_NEGOTIATE_SEAL.Set(minAuthPolicy)
+	minAuthPolicy = NTLMSSP_NEGOTIATE_SIGN.Set(minAuthPolicy)
+	server.SetMinAuthPolicy(minAuthPolicy)
+
+	// Attempt session negotiation
+	if err := NTLMv2SessionNegotiation(t, &client, &server, mode); err == nil {
+		t.Error("Session negotiation was successful despite not meeting minimum authentication policy")
+		t.Fail()
+	}
 }
 
 func TestNTLMv2WithDomain(t *testing.T) {
@@ -186,4 +467,65 @@ func TestWindowsTimeConversion(t *testing.T) {
 	unix := time.Unix(1055844000, 0)
 	result := timeToWindowsFileTime(unix)
 	checkV2Value(t, "Timestamp", result, "0090d336b734c301", nil)
+}
+
+func TestNTLMv2ClientAuthentication(t *testing.T) {
+	client := new(V2ClientSession)
+
+	// From the NTLM specification
+	flags := uint32(0)
+	flags = NTLMSSP_NEGOTIATE_KEY_EXCH.Set(flags)
+	flags = NTLMSSP_NEGOTIATE_56.Set(flags)
+	flags = NTLMSSP_NEGOTIATE_128.Set(flags)
+	flags = NTLMSSP_NEGOTIATE_VERSION.Set(flags)
+	flags = NTLMSSP_NEGOTIATE_TARGET_INFO.Set(flags)
+	flags = NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY.Set(flags)
+	flags = NTLMSSP_TARGET_TYPE_SERVER.Set(flags)
+	flags = NTLMSSP_NEGOTIATE_ALWAYS_SIGN.Set(flags)
+	flags = NTLMSSP_NEGOTIATE_NTLM.Set(flags)
+	flags = NTLMSSP_NEGOTIATE_SEAL.Set(flags)
+	flags = NTLMSSP_NEGOTIATE_SIGN.Set(flags)
+	flags = NTLM_NEGOTIATE_OEM.Set(flags)
+	flags = NTLMSSP_NEGOTIATE_UNICODE.Set(flags)
+	client.SetConfigFlags(flags)
+	client.SetUserInfo("User", "Password", "Domain")
+	client.SetMachineName("COMPUTER")
+
+	bytes, _ := hex.DecodeString("4e544c4d53535000020000000c000c003800000033828ae20123456789abcdef00000000000000002400240044000000060070170000000f53006500720076006500720002000c0044006f006d00610069006e0001000c0053006500720076006500720000000000")
+	if cm, err := ParseChallengeMessage(bytes); err != nil {
+		t.Errorf("Could not parse challenge message: %s", err)
+		t.FailNow()
+	} else {
+		if err := client.ProcessChallengeMessage(cm); err != nil {
+			t.Errorf("Could not parse challenge message: %s", err)
+			t.FailNow()
+		}
+	}
+
+	// Override these random values to allow calculations to be checked
+	client.clientChallenge, _ = hex.DecodeString("aaaaaaaaaaaaaaaa")
+	client.exportedSessionKey, _ = hex.DecodeString("55555555555555555555555555555555")
+	client.timestamp = make([]byte, 8)
+
+	if _, err := client.GenerateAuthenticateMessage(); err != nil {
+		t.Errorf("Error generating authenticate message: %s", err)
+		t.FailNow()
+	}
+
+	checkV2Value(t, "NTChallengeResponse", client.ntChallengeResponse[0:16], "68cd0ab851e51c96aabc927bebef6a1c", nil)
+	checkV2Value(t, "LMChallengeResponse", client.lmChallengeResponse, "86c35097ac9cec102554764a57cccc19aaaaaaaaaaaaaaaa", nil)
+	checkV2Value(t, "SessionBaseKey", client.sessionBaseKey, "8de40ccadbc14a82f15cb0ad0de95ca3", nil)
+	checkV2Value(t, "EncryptedRandomSessionKey", client.encryptedRandomSessionKey, "c5dad2544fc9799094ce1ce90bc9d03e", nil)
+	checkV2Value(t, "client seal key", client.ClientSealingKey, "59f600973cc4960a25480a7c196e4c58", nil)
+	checkV2Value(t, "client signing key", client.ClientSigningKey, "4788dc861b4782f35d43fd98fe1a2d39", nil)
+
+	// Check wrap algorithm
+	encmessage, mac, err := client.Wrap(utf16FromString("Plaintext"), 0)
+	if err != nil {
+		t.Errorf("Error generating authenticate message: %s", err)
+		t.FailNow()
+	}
+
+	checkV2Value(t, "Encrypted message", encmessage, "54e50165bf1936dc996020c1811b0f06fb5f", nil)
+	checkV2Value(t, "MAC", mac, "010000007fb38ec5c55d497600000000", nil)
 }
