@@ -16,12 +16,18 @@ const (
 	Version2 Version = 2
 )
 
-type Mode int
+type Mode struct {
+	integrity       bool
+	replayDetect    bool
+	sequenceDetect  bool
+	confidentiality bool
+	stream          bool
+	identify        bool
+	version         bool
+}
 
-const (
-	ConnectionlessMode Mode = iota
-	ConnectionOrientedMode
-)
+var ConnectionOrientedMode Mode = Mode{stream: true}
+var ConnectionlessMode Mode = Mode{integrity: true, confidentiality: true, stream: false}
 
 // Creates an NTLM v1 or v2 client
 // mode - This must be ConnectionlessMode or ConnectionOrientedMode depending on what type of NTLM is used
@@ -36,6 +42,7 @@ func CreateClientSession(version Version, mode Mode) (n ClientSession, err error
 		return nil, errors.New("Unknown NTLM Version, must be 1 or 2")
 	}
 
+	n.SetRequestedMode(mode)
 	return n, nil
 }
 
@@ -43,7 +50,10 @@ type ClientSession interface {
 	SetUserInfo(username string, password string, domain string)
 	SetMachineName(nbMachineName string)
 
-	SetMode(mode Mode)
+	SetRequestedMode(mode Mode)
+	GetNegotiatedMode() (mode Mode)
+
+	SetConfigFlags(flags uint32) (err error)
 	SetVersion(ver VersionStruct)
 
 	GenerateNegotiateMessage() (*NegotiateMessage, error)
@@ -69,7 +79,7 @@ func CreateServerSession(version Version, mode Mode) (n ServerSession, err error
 		return nil, errors.New("Unknown NTLM Version, must be 1 or 2")
 	}
 
-	n.SetMode(mode)
+	n.SetRequestedMode(mode)
 	return n, nil
 }
 
@@ -79,7 +89,10 @@ type ServerSession interface {
 
 	SetTargetInfo(domainJoined bool, nbMachineName, nbDomainName, dnsMachineName, dnsDomainName, dnsForestName string)
 
-	SetMode(mode Mode)
+	SetRequestedMode(mode Mode)
+	GetNegotiatedMode() (mode Mode)
+
+	SetConfigFlags(flags uint32) (err error)
 	SetVersion(ver VersionStruct)
 
 	SetServerChallenge(challege []byte)
@@ -99,7 +112,6 @@ type ServerSession interface {
 
 // This struct collects NTLM data structures and keys that are used across all types of NTLM requests
 type SessionData struct {
-	mode Mode
 	configFlags    uint32
 	windowsVersion *VersionStruct
 

@@ -31,8 +31,51 @@ func (n *V2Session) GetUserInfo() (string, string, string) {
 	return n.user, n.password, n.userDomain
 }
 
-func (n *V2Session) SetMode(mode Mode) {
-	n.mode = mode
+// SetRequestedMode sets the client configuration flags to a default bitmask to enable the features reqested
+// The default bitmask may be overridden by setting the configuratation flags directly by calling SetConfigFlags
+func (n *V2Session) SetRequestedMode(mode Mode) {
+	flags := uint32(0)
+
+	if mode.integrity || mode.replayDetect || mode.sequenceDetect {
+		flags = NTLMSSP_NEGOTIATE_SIGN.Set(flags)
+	}
+
+	if mode.confidentiality {
+		flags = NTLMSSP_NEGOTIATE_SEAL.Set(flags)
+		flags = NTLMSSP_NEGOTIATE_KEY_EXCH.Set(flags)
+		flags = NTLMSSP_NEGOTIATE_LM_KEY.Set(flags)
+		flags = NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY.Set(flags)
+		flags = NTLMSSP_NEGOTIATE_56.Set(flags)
+		flags = NTLMSSP_NEGOTIATE_128.Set(flags)
+	}
+
+	if !mode.stream {
+		flags = NTLMSSP_NEGOTIATE_DATAGRAM.Set(flags)
+		flags = NTLMSSP_NEGOTIATE_KEY_EXCH.Set(flags)
+	}
+
+	if mode.identify {
+		flags = NTLMSSP_NEGOTIATE_IDENTIFY.Set(flags)
+	}
+
+	if mode.version {
+		flags = NTLMSSP_NEGOTIATE_VERSION.Set(flags)
+	}
+
+	n.SetConfigFlags(flags)
+}
+
+// GetMode may be used to summarise which modes have been negotiated. It should only be called after the session has been negotiated
+func (n *V2Session) GetNegotiatedMode() (mode Mode) {
+
+	mode.integrity = NTLMSSP_NEGOTIATE_SIGN.IsSet(n.NegotiateFlags)
+	mode.replayDetect = NTLMSSP_NEGOTIATE_SIGN.IsSet(n.NegotiateFlags)
+	mode.sequenceDetect = NTLMSSP_NEGOTIATE_SIGN.IsSet(n.NegotiateFlags)
+	mode.confidentiality = NTLMSSP_NEGOTIATE_SEAL.IsSet(n.NegotiateFlags)
+	mode.stream = !NTLMSSP_NEGOTIATE_DATAGRAM.IsSet(n.NegotiateFlags)
+	mode.identify = NTLMSSP_NEGOTIATE_IDENTIFY.IsSet(n.NegotiateFlags)
+
+	return mode
 }
 
 // SetConfigFlags sets the client/server configuration flags (depending upon the session type) used to negotiate the NTLM session
