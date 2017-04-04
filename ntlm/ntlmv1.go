@@ -449,6 +449,17 @@ func (n *V1ServerSession) ProcessAuthenticateMessage(am *AuthenticateMessage) (e
 		return err
 	}
 
+	if am.NtlmV2Response != nil {
+		if avFlags := am.NtlmV2Response.NtlmV2ClientChallenge.AvPairs.Find(MsvAvFlags); avFlags != nil && (avFlags.Value[3]&0x02 == 0x02) {
+			// HMAC_MD5(ExportedSessionKey, ConcatenationOf( NEGOTIATE_MESSAGE, CHALLENGE_MESSAGE, AUTHENTICATE_MESSAGE))
+			calculatedMic := hmacMd5(n.exportedSessionKey, concat(n.challengeMessage.Bytes(), am.Bytes()))
+			if bytes.Compare(calculatedMic, n.mic) != 0 {
+				err = fmt.Errorf("Authentication failure. MIC in authentication message does not match calculated MIC")
+				return err
+			}
+		}
+	}
+
 	n.clientHandle, err = rc4Init(n.ClientSealingKey)
 	if err != nil {
 		return err
@@ -462,17 +473,13 @@ func (n *V1ServerSession) ProcessAuthenticateMessage(am *AuthenticateMessage) (e
 }
 
 func (n *V1ServerSession) computeExportedSessionKey() (err error) {
-	if NTLMSSP_NEGOTIATE_KEY_EXCH.IsSet(n.NegotiateFlags) {
+	if NTLMSSP_NEGOTIATE_KEY_EXCH.IsSet(n.NegotiateFlags) && (NTLMSSP_NEGOTIATE_SIGN.IsSet(n.NegotiateFlags) || NTLMSSP_NEGOTIATE_SEAL.IsSet(n.NegotiateFlags)) {
 		n.exportedSessionKey, err = rc4K(n.keyExchangeKey, n.encryptedRandomSessionKey)
 		if err != nil {
 			return err
 		}
-		// TODO: Calculate mic correctly. This calculation is not producing the right results now
-		// n.calculatedMic = HmacMd5(n.exportedSessionKey, concat(n.challengeMessage.Payload, n.authenticateMessage.Bytes))
 	} else {
 		n.exportedSessionKey = n.keyExchangeKey
-		// TODO: Calculate mic correctly. This calculation is not producing the right results now
-		// n.calculatedMic = HmacMd5(n.keyExchangeKey, concat(n.challengeMessage.Payload, n.authenticateMessage.Bytes))
 	}
 	return nil
 }
@@ -580,6 +587,21 @@ func (n *V1ClientSession) GenerateAuthenticateMessage() (am *AuthenticateMessage
 	am.MessageType = uint32(3)
 	cm := n.challengeMessage
 
+	var avPairs = new(AvPairs)
+
+	// Add Flag to indicate MAC will be calculated
+	if cm.TargetInfoPayloadStruct != nil {
+		avPairs = ReadAvPairs(cm.TargetInfoPayloadStruct.Payload)
+		if avPairs.Find(MsvAvTimestamp) != nil {
+			avFlags := avPairs.Find(MsvAvFlags)
+			if avFlags != nil {
+				avFlags.Value[3] = avFlags.Value[3] | 0x02
+			} else {
+				avPairs.AddAvPair(MsvAvFlags, []byte{0x00, 0x00, 0x00, 0x02})
+			}
+		}
+	}
+
 	err = n.fetchResponseKeys()
 	if err != nil {
 		return nil, err
@@ -633,6 +655,14 @@ func (n *V1ClientSession) GenerateAuthenticateMessage() (am *AuthenticateMessage
 
 	am.EncryptedRandomSessionKey, _ = CreateBytePayload(n.encryptedRandomSessionKey)
 	am.NegotiateFlags = n.NegotiateFlags
+
+	// Set MIC to HMAC_MD5(ExportedSessionKey, ConcatenationOf( CHALLENGE_MESSAGE, AUTHENTICATE_MESSAGE))late MAC
+	if n.challengeMessage.TargetInfo != nil {
+		if avTimestamp := n.challengeMessage.TargetInfo.Find(MsvAvTimestamp); avTimestamp != nil {
+			am.Mic = hmacMd5(n.exportedSessionKey, concat(n.challengeMessage.Bytes(), am.Bytes()))
+		}
+	}
+
 	return am, nil
 }
 
