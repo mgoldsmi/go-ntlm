@@ -367,7 +367,6 @@ func (n *V2ServerSession) GenerateChallengeMessage() (cm *ChallengeMessage, err 
 		timestamp := timeToWindowsFileTime(time.Now())
 		pairs.AddAvPair(MsvAvTimestamp, timestamp)
 
-		pairs.AddAvPair(MsvAvEOL, make([]byte, 0))
 		cm.TargetInfo = pairs
 		cm.TargetInfoPayloadStruct, _ = CreateBytePayload(pairs.Bytes())
 	}

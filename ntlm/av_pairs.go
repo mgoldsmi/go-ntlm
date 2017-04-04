@@ -47,8 +47,12 @@ type AvPairs struct {
 }
 
 func (p *AvPairs) AddAvPair(avId AvPairType, bytes []byte) {
-	a := &AvPair{AvId: avId, AvLen: uint16(len(bytes)), Value: bytes}
-	p.List = append(p.List, *a)
+	if avId != MsvAvEOL {
+		// Avoid adding EOL to the in-memory list as it then requires additional logic to add new pairs before EOL entry
+		// Instead when we generate byte representation we will add MsAvEOL
+		a := &AvPair{AvId: avId, AvLen: uint16(len(bytes)), Value: bytes}
+		p.List = append(p.List, *a)
+	}
 }
 
 func ReadAvPairs(data []byte) *AvPairs {
@@ -58,18 +62,20 @@ func ReadAvPairs(data []byte) *AvPairs {
 	offset := 0
 	for i := 0; len(data) > 0 && i < 11; i++ {
 		pair := ReadAvPair(data, offset)
-		offset = offset + 4 + int(pair.AvLen)
-		pairs.List = append(pairs.List, *pair)
 		if pair.AvId == MsvAvEOL {
+			// Avoid adding EOL to the in-memory list as it then requires additional logic to add new pairs before EOL entry
+			// Instead when we generate byte representation we will add MsAvEOL
 			break
 		}
+		offset = offset + 4 + int(pair.AvLen)
+		pairs.List = append(pairs.List, *pair)
 	}
 
 	return pairs
 }
 
 func (p *AvPairs) Bytes() (result []byte) {
-	totalLength := 0
+	totalLength := 4 // For MsAvEOL that will be added
 	for i := range p.List {
 		a := p.List[i]
 		totalLength = totalLength + int(a.AvLen) + 4
@@ -80,6 +86,9 @@ func (p *AvPairs) Bytes() (result []byte) {
 		a := p.List[i]
 		result = append(result, a.Bytes()...)
 	}
+	// Write MsAvEOL
+	a := &AvPair{AvId: MsvAvEOL, AvLen: 0, Value: []byte{}}
+	result = append(result, a.Bytes()...)
 
 	return result
 }
@@ -160,7 +169,7 @@ func (a *AvPair) String() string {
 	case MsvAvEOL:
 		outString = "MsvAvEOL"
 	case MsvAvNbComputerName:
-		outString = "MsAvNbComputerName: " + a.UnicodeStringValue()
+		outString = "MsvAvNbComputerName: " + a.UnicodeStringValue()
 	case MsvAvNbDomainName:
 		outString = "MsvAvNbDomainName: " + a.UnicodeStringValue()
 	case MsvAvDnsComputerName:
