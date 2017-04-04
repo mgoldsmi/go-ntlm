@@ -675,7 +675,16 @@ func (n *V2ClientSession) GenerateAuthenticateMessage() (am *AuthenticateMessage
 		return nil, err
 	}
 
+	// NTLMv2: Do not send LmChallengeResponse if MsvAvTimestamp is present in TargetInfo (connection oriented) or if just TargetInfo is present (connectionless)
+	if n.challengeMessage.TargetInfo != nil {
+		if NTLMSSP_NEGOTIATE_DATAGRAM.IsSet(n.NegotiateFlags) {
+			am.LmChallengeResponse, _ = CreateBytePayload(zeroBytes(0))
+		} else if avTimestamp := n.challengeMessage.TargetInfo.Find(MsvAvTimestamp); avTimestamp != nil {
+			am.LmChallengeResponse, _ = CreateBytePayload(zeroBytes(24))
+		}
+	} else {
 	am.LmChallengeResponse, _ = CreateBytePayload(n.lmChallengeResponse)
+	}
 	am.NtChallengeResponseFields, _ = CreateBytePayload(n.ntChallengeResponse)
 	am.DomainName, _ = CreateStringPayload(n.userDomain)
 	am.UserName, _ = CreateStringPayload(n.user)
