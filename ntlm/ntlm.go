@@ -54,6 +54,7 @@ type ClientSession interface {
 	GetNegotiatedMode() (mode Mode)
 
 	SetConfigFlags(flags uint32) (err error)
+	SetMinAuthPolicy(flags uint32)
 	SetVersion(ver VersionStruct)
 
 	GenerateNegotiateMessage() (*NegotiateMessage, error)
@@ -93,6 +94,7 @@ type ServerSession interface {
 	GetNegotiatedMode() (mode Mode)
 
 	SetConfigFlags(flags uint32) (err error)
+	SetMinAuthPolicy(flags uint32)
 	SetVersion(ver VersionStruct)
 
 	SetServerChallenge(challege []byte)
@@ -113,6 +115,7 @@ type ServerSession interface {
 // This struct collects NTLM data structures and keys that are used across all types of NTLM requests
 type SessionData struct {
 	configFlags    uint32
+	minAuthPolicy  uint32
 	windowsVersion *VersionStruct
 
 	user       string

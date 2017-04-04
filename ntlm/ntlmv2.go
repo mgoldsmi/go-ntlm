@@ -148,6 +148,12 @@ func (n *V2Session) CheckNegotiateFlags(flags uint32) (err error) {
 		return err
 	}
 
+	// Check that minimum security requirements are met
+	if (flags & n.minAuthPolicy) != n.minAuthPolicy {
+		err := fmt.Errorf("Config flags do not meet minimum authentication policy")
+		return err
+	}
+
 	return nil
 }
 
@@ -177,6 +183,13 @@ func (n *V2Session) GetSupportedNegotiateFlags() (flags uint32) {
 	//NTLM_NEGOTIATE_OEM not supported
 	flags = NTLMSSP_NEGOTIATE_UNICODE.Set(flags)
 	return flags
+}
+
+// Set the negotiate flags that represent the minimum authentication policy of the client or server. This is designed to emulate
+// the function of the HKEY_LOCAL_MACHINE\System\CurrentControlSet\control\LSA\MSV1_0 registry key.
+// See https://support.microsoft.com/en-us/help/239869/how-to-enable-ntlm-2-authentication
+func (n *V2Session) SetMinAuthPolicy(flags uint32) {
+	n.minAuthPolicy = flags
 }
 
 func (n *V2Session) Version() int {
