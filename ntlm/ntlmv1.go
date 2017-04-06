@@ -34,11 +34,11 @@ func (n *V1Session) GetUserInfo() (string, string, string) {
 func (n *V1Session) SetRequestedMode(mode Mode) {
 	flags := uint32(0)
 
-	if mode.integrity || mode.replayDetect || mode.sequenceDetect {
+	if mode.Integrity || mode.ReplayDetect || mode.SequenceDetect {
 		flags = NTLMSSP_NEGOTIATE_SIGN.Set(flags)
 	}
 
-	if mode.confidentiality {
+	if mode.Confidentiality {
 		flags = NTLMSSP_NEGOTIATE_SEAL.Set(flags)
 		flags = NTLMSSP_NEGOTIATE_KEY_EXCH.Set(flags)
 		flags = NTLMSSP_NEGOTIATE_LM_KEY.Set(flags)
@@ -47,16 +47,16 @@ func (n *V1Session) SetRequestedMode(mode Mode) {
 		flags = NTLMSSP_NEGOTIATE_128.Set(flags)
 	}
 
-	if !mode.stream {
+	if !mode.Stream {
 		flags = NTLMSSP_NEGOTIATE_DATAGRAM.Set(flags)
 		flags = NTLMSSP_NEGOTIATE_KEY_EXCH.Set(flags)
 	}
 
-	if mode.identify {
+	if mode.Identify {
 		flags = NTLMSSP_NEGOTIATE_IDENTIFY.Set(flags)
 	}
 
-	if mode.version {
+	if mode.Version {
 		flags = NTLMSSP_NEGOTIATE_VERSION.Set(flags)
 	}
 
@@ -66,12 +66,12 @@ func (n *V1Session) SetRequestedMode(mode Mode) {
 // GetMode may be used to summarise which modes have been negotiated. It should only be called after the session has been negotiated
 func (n *V1Session) GetNegotiatedMode() (mode Mode) {
 
-	mode.integrity = NTLMSSP_NEGOTIATE_SIGN.IsSet(n.NegotiateFlags)
-	mode.replayDetect = NTLMSSP_NEGOTIATE_SIGN.IsSet(n.NegotiateFlags)
-	mode.sequenceDetect = NTLMSSP_NEGOTIATE_SIGN.IsSet(n.NegotiateFlags)
-	mode.confidentiality = NTLMSSP_NEGOTIATE_SEAL.IsSet(n.NegotiateFlags)
-	mode.stream = !NTLMSSP_NEGOTIATE_DATAGRAM.IsSet(n.NegotiateFlags)
-	mode.identify = NTLMSSP_NEGOTIATE_IDENTIFY.IsSet(n.NegotiateFlags)
+	mode.Integrity = NTLMSSP_NEGOTIATE_SIGN.IsSet(n.NegotiateFlags)
+	mode.ReplayDetect = NTLMSSP_NEGOTIATE_SIGN.IsSet(n.NegotiateFlags)
+	mode.SequenceDetect = NTLMSSP_NEGOTIATE_SIGN.IsSet(n.NegotiateFlags)
+	mode.Confidentiality = NTLMSSP_NEGOTIATE_SEAL.IsSet(n.NegotiateFlags)
+	mode.Stream = !NTLMSSP_NEGOTIATE_DATAGRAM.IsSet(n.NegotiateFlags)
+	mode.Identify = NTLMSSP_NEGOTIATE_IDENTIFY.IsSet(n.NegotiateFlags)
 
 	return mode
 }
@@ -650,7 +650,7 @@ func (n *V1ClientSession) GenerateAuthenticateMessage() (am *AuthenticateMessage
 	// Set machine name to the server name returned in challenge message if windows version information is to be sent
 	if NTLMSSP_NEGOTIATE_VERSION.IsSet(n.NegotiateFlags) {
 		am.Version = n.windowsVersion
-	am.Workstation, _ = CreateStringPayload(n.nbMachineName)
+		am.Workstation, _ = CreateStringPayload(n.nbMachineName)
 	}
 
 	am.EncryptedRandomSessionKey, _ = CreateBytePayload(n.encryptedRandomSessionKey)

@@ -17,17 +17,17 @@ const (
 )
 
 type Mode struct {
-	integrity       bool
-	replayDetect    bool
-	sequenceDetect  bool
-	confidentiality bool
-	stream          bool
-	identify        bool
-	version         bool
+	Integrity       bool
+	ReplayDetect    bool
+	SequenceDetect  bool
+	Confidentiality bool
+	Stream          bool
+	Identify        bool
+	Version         bool
 }
 
-var ConnectionOrientedMode Mode = Mode{stream: true}
-var ConnectionlessMode Mode = Mode{integrity: true, confidentiality: true, stream: false}
+var ConnectionOrientedMode Mode = Mode{Stream: true}
+var ConnectionlessMode Mode = Mode{Integrity: true, Confidentiality: true, Stream: false}
 
 // Creates an NTLM v1 or v2 client
 // mode - This must be ConnectionlessMode or ConnectionOrientedMode depending on what type of NTLM is used

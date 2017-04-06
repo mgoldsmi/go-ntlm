@@ -126,7 +126,7 @@ func NTLMv2SessionNegotiation(t *testing.T, client *ClientSession, server *Serve
 
 	c, s := *client, *server
 
-	if mode.stream {
+	if mode.Stream {
 		nm, err := c.GenerateNegotiateMessage()
 		if err != nil {
 			err := fmt.Errorf("Could not generate negotiate message: %s", err)
@@ -270,7 +270,7 @@ func TestNTLMv2ConnectionOriented(t *testing.T) {
  */
 func TestNTLMv2Connectionless(t *testing.T) {
 
-	mode := Mode{integrity: true, confidentiality: true, stream: false}
+	mode := Mode{Integrity: true, Confidentiality: true, Stream: false}
 	client, err := CreateClientSession(Version2, mode)
 	if err != nil {
 		t.Errorf("Could not create client session: %s", err)
